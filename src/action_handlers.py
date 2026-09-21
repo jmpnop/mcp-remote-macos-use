@@ -124,15 +124,20 @@ def handle_remote_macos_mouse_scroll(arguments: dict[str, Any]) -> list[types.Te
         # First move the mouse to the target location without clicking
         move_result = vnc.send_pointer_event(scaled_x, scaled_y, 0)
 
-        # Map of special keys for page up/down
-        special_keys = {
-            "up": 0xff55,    # Page Up key
-            "down": 0xff56,  # Page Down key
-        }
+        # BUGFIX: previously this sent Page Up/Down KEY events (0xff55/0xff56),
+        # which are delivered to whatever window holds KEYBOARD focus -- so scrolling
+        # over a popover/sheet leaked to the app behind it. A real scroll must use the
+        # RFB pointer wheel buttons, which act on the view UNDER THE CURSOR regardless
+        # of keyboard focus. Wheel notch = press+release of the wheel button at (x,y).
+        #   bit 3 = wheel up (mask 8), bit 4 = wheel down (mask 16)
+        wheel_mask = 8 if direction.lower() == "up" else 16
+        clicks = int(arguments.get("clicks", 5))
+        clicks = max(1, min(clicks, 50))
 
-        # Send the appropriate page key based on direction
-        key = special_keys["up" if direction.lower() == "up" else "down"]
-        key_result = vnc.send_key_event(key, True) and vnc.send_key_event(key, False)
+        wheel_result = True
+        for _ in range(clicks):
+            wheel_result = vnc.send_pointer_event(scaled_x, scaled_y, wheel_mask) and wheel_result
+            wheel_result = vnc.send_pointer_event(scaled_x, scaled_y, 0) and wheel_result
 
         # Prepare the response with useful details
         scale_factors = {
@@ -143,7 +148,7 @@ def handle_remote_macos_mouse_scroll(arguments: dict[str, Any]) -> list[types.Te
         return [types.TextContent(
             type="text",
             text=f"""Mouse move to ({scaled_x}, {scaled_y}) {'succeeded' if move_result else 'failed'}
-Page {direction} key press {'succeeded' if key_result else 'failed'}
+Scroll {direction} ({clicks} wheel notches at cursor) {'succeeded' if wheel_result else 'failed'}
 Source dimensions: {source_width}x{source_height}
 Target dimensions: {target_width}x{target_height}
 Scale factors: {scale_factors['x']:.4f}x, {scale_factors['y']:.4f}y"""

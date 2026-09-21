@@ -134,26 +134,34 @@ async def test_handle_remote_macos_mouse_scroll(mock_env_vars):
         mock_instance.height = 1080
         mock_instance.send_pointer_event.return_value = True
         mock_instance.send_key_event.return_value = True
-        
+
         # Act
         if IS_MOUSE_SCROLL_ASYNC:
             result = await handle_remote_macos_mouse_scroll({
                 "x": 100,
                 "y": 200,
-                "direction": "down"
+                "direction": "down",
+                "clicks": 3
             })
         else:
             result = handle_remote_macos_mouse_scroll({
                 "x": 100,
                 "y": 200,
-                "direction": "down"
+                "direction": "down",
+                "clicks": 3
             })
-        
+
         # Assert
         assert len(result) == 1
         assert result[0].type == "text"
         mock_instance.connect.assert_called_once()
         mock_instance.close.assert_called_once()
+        # Scroll must use real wheel-button pointer events, NOT key events
+        # (keys leak to whatever holds keyboard focus). Scaled coords: 100/1366*1920=140, 200/768*1080=281.
+        mock_instance.send_key_event.assert_not_called()
+        # 1 initial move (mask 0) + clicks * (press wheel-down mask 16, release mask 0)
+        button_masks = [call.args[2] for call in mock_instance.send_pointer_event.call_args_list]
+        assert button_masks == [0, 16, 0, 16, 0, 16, 0]
 
 @pytest.mark.asyncio
 async def test_handle_remote_macos_mouse_click(mock_env_vars):

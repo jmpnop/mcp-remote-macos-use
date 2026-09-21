@@ -140,7 +140,7 @@ async def main():
             ),
             types.Tool(
                 name="remote_macos_mouse_scroll",
-                description="Perform a mouse scroll at specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Uses environment variables for connection details.",
+                description="Perform a mouse scroll at specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Emits real scroll-wheel events at the cursor (so it scrolls the view under the pointer, e.g. popovers/sheets, regardless of keyboard focus). Uses environment variables for connection details.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -153,7 +153,8 @@ async def main():
                             "description": "Scroll direction",
                             "enum": ["up", "down"],
                             "default": "down"
-                        }
+                        },
+                        "clicks": {"type": "integer", "description": "Number of scroll-wheel notches to emit at the cursor", "default": 5}
                     },
                     "required": ["x", "y"]
                 },
