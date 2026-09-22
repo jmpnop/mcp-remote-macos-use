@@ -218,7 +218,7 @@ async def main():
             ),
             types.Tool(
                 name="remote_macos_open_application",
-                description="Opens/activates an application and returns its PID for further interactions.",
+                description="Opens (via Spotlight) or activates an application on the remote Mac. If the app is already running it is ACTIVATED — its existing window is brought to front and NO new window is created (do not send an extra cmd+n expecting a fresh window; open a new one explicitly only if you need it). Returns a launch confirmation only; no PID is available over the VNC transport.",
                 inputSchema={
                     "type": "object",
                     "properties": {
