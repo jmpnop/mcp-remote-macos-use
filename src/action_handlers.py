@@ -123,6 +123,8 @@ def handle_remote_macos_mouse_scroll(arguments: dict[str, Any]) -> list[types.Te
 
         # First move the mouse to the target location without clicking
         move_result = vnc.send_pointer_event(scaled_x, scaled_y, 0)
+        # Let the cursor position settle so the wheel acts on the view under it.
+        time.sleep(0.08)
 
         # BUGFIX: previously this sent Page Up/Down KEY events (0xff55/0xff56),
         # which are delivered to whatever window holds KEYBOARD focus -- so scrolling
@@ -136,8 +138,12 @@ def handle_remote_macos_mouse_scroll(arguments: dict[str, Any]) -> list[types.Te
 
         wheel_result = True
         for _ in range(clicks):
+            # Each notch must be a distinct press->release with a gap, or Apple's VNC
+            # coalesces the burst into a single (or zero) scroll event.
             wheel_result = vnc.send_pointer_event(scaled_x, scaled_y, wheel_mask) and wheel_result
+            time.sleep(0.02)
             wheel_result = vnc.send_pointer_event(scaled_x, scaled_y, 0) and wheel_result
+            time.sleep(0.04)
 
         # Prepare the response with useful details
         scale_factors = {
@@ -311,7 +317,12 @@ def handle_remote_macos_send_keys(arguments: dict[str, Any]) -> list[types.TextC
         if special_key:
             if special_key.lower() in special_keys:
                 key = special_keys[special_key.lower()]
-                if vnc.send_key_event(key, True) and vnc.send_key_event(key, False):
+                # Hold briefly between down and up; a zero-length press is dropped by
+                # Apple's VNC, which is why arrow/nav keys registered only intermittently.
+                _kdown = vnc.send_key_event(key, True)
+                time.sleep(0.04)
+                _kup = vnc.send_key_event(key, False)
+                if _kdown and _kup:
                     result_message.append(f"Sent special key: {special_key}")
                 else:
                     result_message.append(f"Failed to send special key: {special_key}")

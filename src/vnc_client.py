@@ -516,6 +516,10 @@ class VNCClient:
             self._set_encodings([Encoding.RAW, Encoding.COPY_RECT, Encoding.DESKTOP_SIZE])
 
             logger.info("VNC connection fully established and configured")
+            # Every action opens a fresh connection; give the server a moment to be
+            # ready for input, otherwise the first pointer/key event after connect is
+            # dropped (a big source of the "click/key did nothing" flakiness).
+            time.sleep(0.12)
             return True, None
 
         except Exception as e:
@@ -885,6 +889,11 @@ class VNCClient:
             # Move mouse to position first (no buttons pressed)
             if not self.send_pointer_event(x, y, 0):
                 return False
+
+            # Let the server register the cursor position before pressing. Apple's
+            # Screen Sharing VNC drops a button press that arrives in the same instant
+            # as the move, so the click lands with no target under the cursor.
+            time.sleep(0.06)
 
             # Single click or first click of double-click
             if not self.send_pointer_event(x, y, button_mask):
