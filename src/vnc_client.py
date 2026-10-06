@@ -164,12 +164,56 @@ class Encoding:
     ZRLE = 16
     CURSOR = -239
     DESKTOP_SIZE = -223
+    # Pseudo-encoding advertising that the client understands the QEMU Extended
+    # Key Event message (client->server msg type 255, submsg 0): keysym + a real
+    # hardware keycode (XT scancode). This is the "true HID" input path; a server
+    # that honors it routes events through the HID layer, which reaches focus/
+    # default-button handling that bare keysym KeyEvents can miss.
+    QEMU_EXTENDED_KEY = -258
+
+
+# keysym -> XT set-1 hardware scancode, for QEMU Extended Key Events. Extended
+# (E0-prefixed) keys are encoded as 0xE0xx per the QEMU/RFB convention. Only the
+# keys this client actually emits are mapped; anything absent falls back to the
+# standard keysym KeyEvent automatically.
+KEYSYM_TO_XT = {
+    # letters a-z (keysym == ord)
+    **{ord(c): kc for c, kc in zip(
+        "abcdefghijklmnopqrstuvwxyz",
+        [0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26,
+         0x32, 0x31, 0x18, 0x19, 0x10, 0x13, 0x1f, 0x14, 0x16, 0x2f, 0x11, 0x2d,
+         0x15, 0x2c])},
+    # digits 0-9
+    0x30: 0x0b, 0x31: 0x02, 0x32: 0x03, 0x33: 0x04, 0x34: 0x05,
+    0x35: 0x06, 0x36: 0x07, 0x37: 0x08, 0x38: 0x09, 0x39: 0x0a,
+    0x20: 0x39,            # space
+    0xff0d: 0x1c,          # Return/Enter
+    0xff1b: 0x01,          # Escape
+    0xff08: 0x0e,          # Backspace
+    0xff09: 0x0f,          # Tab
+    0xffe1: 0x2a,          # Shift_L
+    0xffe3: 0x1d,          # Control_L
+    0xffe9: 0x38,          # Alt_L / Option
+    0xffeb: 0xe05b,        # Super_L / Command (left GUI, extended)
+    0xffe7: 0xe05b,        # Meta_L -> left GUI
+    0xff51: 0xe04b,        # Left
+    0xff52: 0xe048,        # Up
+    0xff53: 0xe04d,        # Right
+    0xff54: 0xe050,        # Down
+    0xff50: 0xe047,        # Home
+    0xff57: 0xe04f,        # End
+    0xff55: 0xe049,        # Page_Up
+    0xff56: 0xe051,        # Page_Down
+    0xffff: 0xe053,        # Delete
+    **{0xffbe + i: kc for i, kc in enumerate(
+        [0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58])},  # F1-F12
+}
 
 class VNCClient:
     """VNC client implementation to connect to remote MacOs machines and capture screenshots."""
 
     def __init__(self, host: str, port: int = 5900, password: Optional[str] = None, username: Optional[str] = None,
-                 encryption: str = "prefer_on"):
+                 encryption: str = "prefer_on", prefer_hid: bool = False):
         """Initialize VNC client with connection parameters.
 
         Args:
@@ -184,6 +228,9 @@ class VNCClient:
         self.password = password
         self.username = username
         self.encryption = encryption
+        # Opt-in: emit QEMU Extended Key Events (hardware scancodes) instead of
+        # bare keysym KeyEvents, for destinations that want the "true HID" path.
+        self.prefer_hid = prefer_hid
         self.socket = None
         self.width = 0
         self.height = 0
@@ -513,7 +560,10 @@ class VNCClient:
 
             # Set encodings (prioritize the ones we can actually handle)
             logger.debug("Setting supported encodings")
-            self._set_encodings([Encoding.RAW, Encoding.COPY_RECT, Encoding.DESKTOP_SIZE])
+            # Advertise QEMU Extended Key Event support so the server will accept the
+            # HID/scancode key path (harmless if the server ignores the pseudo-encoding).
+            self._set_encodings([Encoding.RAW, Encoding.COPY_RECT, Encoding.DESKTOP_SIZE,
+                                 Encoding.QEMU_EXTENDED_KEY])
 
             logger.info("VNC connection fully established and configured")
             # Every action opens a fresh connection; give the server a moment to be
@@ -798,6 +848,14 @@ class VNCClient:
                 logger.error("Not connected to remote MacOs machine")
                 return False
 
+            # True-HID path: a QEMU Extended Key Event (keysym + hardware
+            # scancode) when enabled and the scancode is known; otherwise fall
+            # through to the standard keysym KeyEvent below.
+            if self.prefer_hid:
+                keycode = KEYSYM_TO_XT.get(key)
+                if keycode is not None:
+                    return self._send_qemu_key_event(key, keycode, down)
+
             # Message type 4 = KeyEvent
             message = bytearray([4])
 
@@ -816,6 +874,51 @@ class VNCClient:
 
         except Exception as e:
             logger.error(f"Error sending key event: {str(e)}")
+            return False
+
+    def _send_qemu_key_event(self, keysym: int, keycode: int, down: bool) -> bool:
+        """Send a QEMU Extended Key Event (client->server msg type 255, submsg 0).
+
+        Layout: [255][0][down:u16][keysym:u32][keycode:u32]. ``keycode`` is the XT
+        set-1 hardware scancode (E0-extended keys as 0xE0xx). Servers that honor
+        the QEMU Extended Key Event pseudo-encoding inject this through the HID
+        layer (the "true HID" path).
+        """
+        try:
+            if not self.socket:
+                logger.error("Not connected to remote MacOs machine")
+                return False
+            message = bytearray([255, 0])                       # type 255, submessage 0
+            message.extend((1 if down else 0).to_bytes(2, 'big'))
+            message.extend(keysym.to_bytes(4, 'big'))
+            message.extend(keycode.to_bytes(4, 'big'))
+            logger.debug(f"Sending QEMU ExtKey: keysym=0x{keysym:04x} keycode=0x{keycode:04x} down={down}")
+            self.socket.sendall(message)
+            return True
+        except Exception as e:
+            logger.error(f"Error sending QEMU key event: {str(e)}")
+            return False
+
+    def send_client_cut_text(self, text: str) -> bool:
+        """Set the remote clipboard (RFB ClientCutText, msg type 6).
+
+        Layout: [6][0,0,0 padding][length:u32][latin-1 text]. Lets us push text to
+        the remote pasteboard and Cmd+V it, which is far more reliable for bulk
+        text than synthesizing one key event per character.
+        """
+        try:
+            if not self.socket:
+                logger.error("Not connected to remote MacOs machine")
+                return False
+            data = text.encode("latin-1", errors="replace")
+            message = bytearray([6, 0, 0, 0])
+            message.extend(len(data).to_bytes(4, "big"))
+            message.extend(data)
+            self.socket.sendall(message)
+            logger.debug(f"Sent ClientCutText ({len(data)} bytes) to remote clipboard")
+            return True
+        except Exception as e:
+            logger.error(f"Error sending clipboard text: {str(e)}")
             return False
 
     def send_pointer_event(self, x: int, y: int, button_mask: int) -> bool:
@@ -968,11 +1071,14 @@ class VNCClient:
                     if not self.send_key_event(0xffe1, True):
                         success = False
                         break
+                    time.sleep(0.02)  # let Shift register before the key
 
-                # Press key
+                # Press key, hold briefly, then release (a zero-length press can be
+                # dropped by secure/modified fields).
                 if not self.send_key_event(key, True):
                     success = False
                     break
+                time.sleep(0.02)
 
                 # Release key
                 if not self.send_key_event(key, False):
@@ -1008,15 +1114,20 @@ class VNCClient:
                 logger.error("Not connected to remote MacOs machine")
                 return False
 
-            # Press all keys in sequence
+            # Press keys in order, settling after each so the server registers the
+            # modifier state before the next key arrives. Zero-delay presses were a
+            # real source of dropped combos (e.g. cmd+a going nowhere).
             for key in keys:
                 if not self.send_key_event(key, True):
                     return False
+                time.sleep(0.03)
 
-            # Release all keys in reverse order
+            # Hold the chord briefly, then release in reverse order.
+            time.sleep(0.04)
             for key in reversed(keys):
                 if not self.send_key_event(key, False):
                     return False
+                time.sleep(0.02)
 
             return True
 

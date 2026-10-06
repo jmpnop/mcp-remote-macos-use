@@ -164,6 +164,7 @@ async def main():
                     "type": "object",
                     "properties": {
                         "text": {"type": "string", "description": "Text to send as keystrokes"},
+                        "use_clipboard": {"type": "boolean", "description": "With `text`: set the remote clipboard and Cmd+V instead of per-key typing (robust for long/unicode text)", "default": False},
                         "special_key": {"type": "string", "description": "Special key to send (e.g., 'enter', 'backspace', 'tab', 'escape', etc.)"},
                         "key_combination": {"type": "string", "description": "Key combination to send (e.g., 'ctrl+c', 'cmd+q', 'ctrl+alt+delete', etc.)"}
                     },

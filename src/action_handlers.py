@@ -10,7 +10,7 @@ import mcp.types as types
 # Import vnc_client from the current directory
 from vnc_client import VNCClient, capture_vnc_screen
 # Destination registry: one server, many target Macs chosen per call.
-from destinations import resolve as resolve_destination
+from destinations import resolve as resolve_destination, prefers_hid
 
 # Configure logging
 logging.basicConfig(
@@ -94,7 +94,8 @@ def handle_remote_macos_mouse_scroll(arguments: dict[str, Any]) -> list[types.Te
         raise ValueError("Source dimensions must be positive values")
 
     # Initialize VNC client
-    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption)
+    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption,
+                    prefer_hid=prefers_hid(arguments.get("destination")))
 
     # Connect to remote MacOs machine
     success, error_message = vnc.connect()
@@ -178,7 +179,8 @@ def handle_remote_macos_mouse_click(arguments: dict[str, Any]) -> list[types.Tex
         raise ValueError("Source dimensions must be positive values")
 
     # Initialize VNC client
-    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption)
+    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption,
+                    prefer_hid=prefers_hid(arguments.get("destination")))
 
     # Connect to remote MacOs machine
     success, error_message = vnc.connect()
@@ -234,7 +236,8 @@ def handle_remote_macos_send_keys(arguments: dict[str, Any]) -> list[types.TextC
         raise ValueError("Either text, special_key, or key_combination must be provided")
 
     # Initialize VNC client
-    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption)
+    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption,
+                    prefer_hid=prefers_hid(arguments.get("destination")))
 
     # Connect to remote MacOs machine
     success, error_message = vnc.connect()
@@ -316,9 +319,20 @@ def handle_remote_macos_send_keys(arguments: dict[str, Any]) -> list[types.TextC
                 result_message.append(f"Unknown special key: {special_key}")
                 result_message.append(f"Supported special keys: {', '.join(special_keys.keys())}")
 
-        # Process text
+        # Process text. With use_clipboard=True, push the text to the remote
+        # pasteboard and Cmd+V it (robust for bulk/unicode text; sidesteps the
+        # per-character key synthesis that flakes on some fields).
         if text:
-            if vnc.send_text(text):
+            if arguments.get("use_clipboard"):
+                if vnc.send_client_cut_text(text):
+                    time.sleep(0.1)  # let the pasteboard update land
+                    if vnc.send_key_combination([0xffeb, ord('v')]):  # Cmd+V
+                        result_message.append(f"Pasted text via clipboard: '{text}'")
+                    else:
+                        result_message.append("Set clipboard but Cmd+V failed")
+                else:
+                    result_message.append(f"Failed to set remote clipboard: '{text}'")
+            elif vnc.send_text(text):
                 result_message.append(f"Sent text: '{text}'")
             else:
                 result_message.append(f"Failed to send text: '{text}'")
@@ -374,7 +388,8 @@ def handle_remote_macos_mouse_double_click(arguments: dict[str, Any]) -> list[ty
         raise ValueError("Source dimensions must be positive values")
 
     # Initialize VNC client
-    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption)
+    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption,
+                    prefer_hid=prefers_hid(arguments.get("destination")))
 
     # Connect to remote MacOs machine
     success, error_message = vnc.connect()
@@ -435,7 +450,8 @@ def handle_remote_macos_mouse_move(arguments: dict[str, Any]) -> list[types.Text
         raise ValueError("Source dimensions must be positive values")
 
     # Initialize VNC client
-    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption)
+    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption,
+                    prefer_hid=prefers_hid(arguments.get("destination")))
 
     # Connect to remote MacOs machine
     success, error_message = vnc.connect()
@@ -498,7 +514,8 @@ def handle_remote_macos_open_application(arguments: dict[str, Any]) -> List[type
     start_time = time.time()
 
     # Initialize VNC client
-    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption)
+    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption,
+                    prefer_hid=prefers_hid(arguments.get("destination")))
 
     # Connect to remote MacOs machine
     success, error_message = vnc.connect()
@@ -571,7 +588,8 @@ def handle_remote_macos_mouse_drag_n_drop(arguments: dict[str, Any]) -> list[typ
         raise ValueError("Source dimensions must be positive values")
 
     # Initialize VNC client
-    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption)
+    vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption,
+                    prefer_hid=prefers_hid(arguments.get("destination")))
 
     # Connect to remote MacOs machine
     success, error_message = vnc.connect()
