@@ -42,7 +42,8 @@ def test_type_text_builds_ssh_vhid_type():
     assert ok
     argv = run.call_args[0][0]
     assert argv[0] == "ssh" and "dima@h" in argv
-    assert argv[-3:] == ["vhid", "type", "Gagarin0!"]
+    # Invoked by absolute path: the remote non-login ssh PATH lacks /usr/local/bin.
+    assert argv[-3:] == ["/usr/local/bin/vhid", "type", "Gagarin0!"]
 
 
 def test_press_builds_chord():

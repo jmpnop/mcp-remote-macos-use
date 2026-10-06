@@ -21,6 +21,12 @@ from typing import List, Optional, Tuple
 
 logger = logging.getLogger("vhid_backend")
 
+# The absolute path the vhid pkg always installs the CLI at. Invoked by full path, never as
+# bare ``vhid``: a non-interactive ``ssh host cmd`` runs a non-login shell whose PATH is the
+# system default (/usr/bin:/bin:/usr/sbin:/sbin) with no /usr/local/bin, so bare ``vhid``
+# is "command not found". [LAW:no-silent-failure]
+_VHID = "/usr/local/bin/vhid"
+
 # MCP key/modifier names (see action_handlers special_keys/modifier_keys) -> vhid names.
 # vhid is built on Karabiner-DriverKit, which uses these identifiers. type_text and click
 # (the secure-sheet-critical verbs) need none of this; an unmapped key makes map_keys
@@ -47,7 +53,7 @@ def _run(ssh: str, vhid_args: List[str], timeout: int = 20) -> Tuple[bool, str]:
     vhidd runs as root on the target, so the SSH user needs no sudo. Returns (ok, detail);
     a non-zero exit, a timeout, or SSH failure is (False, <stderr/first line>), never raised.
     """
-    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", ssh, "vhid", *vhid_args]
+    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", ssh, _VHID, *vhid_args]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
