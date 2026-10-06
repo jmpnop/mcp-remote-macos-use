@@ -10,7 +10,9 @@ import mcp.types as types
 # Import vnc_client from the current directory
 from vnc_client import VNCClient, capture_vnc_screen
 # Destination registry: one server, many target Macs chosen per call.
-from destinations import resolve as resolve_destination, prefers_hid
+from destinations import resolve as resolve_destination, prefers_hid, input_backend
+# Target-side vhid (real-hardware HID over SSH) — reaches Secure-Event-Input dialogs that RFB can't.
+import vhid_backend
 
 # Configure logging
 logging.basicConfig(
@@ -40,6 +42,37 @@ if not MACOS_HOST:
 
 if not MACOS_PASSWORD:
     logger.warning("MACOS_PASSWORD environment variable is not set")
+
+
+def _send_keys_via_vhid(ssh: str, text, special_key, key_combination):
+    """Send keys through target-side vhid. Returns (handled, message).
+
+    handled=False means the caller should fall back to RFB — either a key had no vhid
+    mapping (checked up front, before anything is sent, so no double-type) or vhid failed.
+    """
+    special_chord = vhid_backend.map_keys([special_key]) if special_key else None
+    combo_chord = (vhid_backend.map_keys([p.strip() for p in key_combination.split("+")])
+                   if key_combination else None)
+    if (special_key and not special_chord) or (key_combination and not combo_chord):
+        return False, "unmapped key"
+
+    sent = []
+    if special_chord:
+        ok, detail = vhid_backend.press(ssh, special_chord)
+        if not ok:
+            return False, detail
+        sent.append(f"special key '{special_key}'")
+    if text:
+        ok, detail = vhid_backend.type_text(ssh, text)
+        if not ok:
+            return False, detail
+        sent.append(f"text '{text}'")
+    if combo_chord:
+        ok, detail = vhid_backend.press(ssh, combo_chord)
+        if not ok:
+            return False, detail
+        sent.append(f"combination '{key_combination}'")
+    return True, "Sent via vhid (real HID): " + "; ".join(sent)
 
 
 async def handle_remote_macos_get_screen(arguments: dict[str, Any]) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
@@ -202,7 +235,15 @@ def handle_remote_macos_mouse_click(arguments: dict[str, Any]) -> list[types.Tex
         scaled_y = max(0, min(scaled_y, target_height - 1))
 
         # Single click
-        result = vnc.send_mouse_click(scaled_x, scaled_y, button, False)
+        # Inject via target-side vhid (real HID) when this destination opts in — reaches
+        # authd sheets / lock screen a synthetic RFB click can't; RFB on fallback.
+        _vb, _ssh = input_backend(arguments.get("destination"))
+        if _vb == "vhid":
+            _ok, _ = vhid_backend.click(_ssh, scaled_x, scaled_y,
+                                        button=("right" if button == 3 else "left"), times=1)
+            result = _ok or vnc.send_mouse_click(scaled_x, scaled_y, button, False)
+        else:
+            result = vnc.send_mouse_click(scaled_x, scaled_y, button, False)
 
         # Prepare the response with useful details
         scale_factors = {
@@ -234,6 +275,17 @@ def handle_remote_macos_send_keys(arguments: dict[str, Any]) -> list[types.TextC
 
     if not text and not special_key and not key_combination:
         raise ValueError("Either text, special_key, or key_combination must be provided")
+
+    # If this destination delivers input via target-side vhid (real hardware HID over SSH),
+    # use it — it reaches the lock screen / login window / authd "modify settings" sheets
+    # that RFB's synthetic events can't. Any unmapped key or vhid failure falls through to
+    # the RFB path below, so behavior degrades gracefully instead of breaking.
+    backend, ssh_ep = input_backend(arguments.get("destination"))
+    if backend == "vhid":
+        handled, msg = _send_keys_via_vhid(ssh_ep, text, special_key, key_combination)
+        if handled:
+            return [types.TextContent(type="text", text=msg)]
+        logger.info("vhid key path unavailable (%s); falling back to RFB", msg)
 
     # Initialize VNC client
     vnc = VNCClient(host=host, port=port, password=password, username=username, encryption=encryption,
@@ -411,7 +463,13 @@ def handle_remote_macos_mouse_double_click(arguments: dict[str, Any]) -> list[ty
         scaled_y = max(0, min(scaled_y, target_height - 1))
 
         # Double click
-        result = vnc.send_mouse_click(scaled_x, scaled_y, button, True)
+        _vb, _ssh = input_backend(arguments.get("destination"))
+        if _vb == "vhid":
+            _ok, _ = vhid_backend.click(_ssh, scaled_x, scaled_y,
+                                        button=("right" if button == 3 else "left"), times=2)
+            result = _ok or vnc.send_mouse_click(scaled_x, scaled_y, button, True)
+        else:
+            result = vnc.send_mouse_click(scaled_x, scaled_y, button, True)
 
         # Prepare the response with useful details
         scale_factors = {

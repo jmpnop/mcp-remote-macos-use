@@ -129,6 +129,21 @@ def resolve(name: Optional[str] = None) -> Tuple[str, int, str, str, str]:
     )
 
 
+def input_backend(name: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    """Return how to deliver keyboard/mouse input to a destination.
+
+    ('vhid', '<ssh endpoint>') when the destination sets ``input: "vhid"`` and an ``ssh``
+    endpoint (e.g. 'dima@10.10.10.91') — input then goes through target-side vhid (real HID,
+    reaches Secure-Event-Input dialogs). Otherwise ('rfb', None) — the standard RFB path.
+    Screen capture always uses RFB regardless of this.
+    """
+    destinations, default = _load_registry()
+    d = destinations.get((name or default) or "", {})
+    if str(d.get("input", "rfb")).lower() == "vhid" and d.get("ssh"):
+        return "vhid", d["ssh"]
+    return "rfb", None
+
+
 def prefers_hid(name: Optional[str] = None) -> bool:
     """Whether a destination opts into the QEMU extended-key (HID) input path."""
     destinations, default = _load_registry()
