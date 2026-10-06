@@ -41,6 +41,9 @@ from action_handlers import (
     handle_remote_macos_mouse_drag_n_drop
 )
 
+# Destination registry (one server, many targets selected per call).
+from destinations import list_names as dest_list_names, default_name as dest_default_name
+
 # Configure logging
 logging.basicConfig(
     level=logging.DEBUG,
@@ -71,14 +74,18 @@ logger.info(f"LIVEKIT_URL from environment: {'Set' if LIVEKIT_URL else 'Not set'
 logger.info(f"LIVEKIT_API_KEY from environment: {'Set' if LIVEKIT_API_KEY else 'Not set'}")
 logger.info(f"LIVEKIT_API_SECRET from environment: {'Set' if LIVEKIT_API_SECRET else 'Not set'}")
 
-# Validate required environment variables
-if not MACOS_HOST:
-    logger.error("MACOS_HOST environment variable is required but not set")
-    raise ValueError("MACOS_HOST environment variable is required but not set")
-
-if not MACOS_PASSWORD:
-    logger.error("MACOS_PASSWORD environment variable is required but not set")
-    raise ValueError("MACOS_PASSWORD environment variable is required but not set")
+# Destinations come from the registry (file / MACOS_DESTINATIONS env), with the
+# legacy single-destination MACOS_* env folded in as the "env" destination. Do NOT
+# hard-fail at import: one server process now serves many targets, so a missing
+# single-default env is fine as long as the registry has entries. Just warn.
+_known_destinations = dest_list_names()
+if not _known_destinations:
+    logger.warning(
+        "No destinations configured (registry empty and MACOS_HOST unset). "
+        "Create ~/.config/remote-macos/destinations.json or set MACOS_DESTINATIONS / MACOS_HOST."
+    )
+else:
+    logger.info("Destinations available: %s (default: %s)", _known_destinations, dest_default_name())
 
 
 async def main():
@@ -107,15 +114,6 @@ async def main():
             logger.warning("Failed to establish LiveKit connection")
             livekit_handler = None
 
-    # Validate required environment variables
-    if not MACOS_HOST:
-        logger.error("MACOS_HOST environment variable is required but not set")
-        raise ValueError("MACOS_HOST environment variable is required but not set")
-
-    if not MACOS_PASSWORD:
-        logger.error("MACOS_PASSWORD environment variable is required but not set")
-        raise ValueError("MACOS_PASSWORD environment variable is required but not set")
-
     server = Server("remote-macos-client")
 
     @server.list_resources()
@@ -129,10 +127,10 @@ async def main():
     @server.list_tools()
     async def handle_list_tools() -> list[types.Tool]:
         """List available tools"""
-        return [
+        _tools = [
             types.Tool(
                 name="remote_macos_get_screen",
-                description="Connect to a remote MacOs machine and get a screenshot of the remote desktop. Uses environment variables for connection details.",
+                description="Connect to a remote MacOs machine and get a screenshot of the remote desktop. Target machine via the optional `destination` arg (defaults to the registry default).",
                 inputSchema={
                     "type": "object",
                     "properties": {}
@@ -140,7 +138,7 @@ async def main():
             ),
             types.Tool(
                 name="remote_macos_mouse_scroll",
-                description="Perform a mouse scroll at specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Emits real scroll-wheel events at the cursor (so it scrolls the view under the pointer, e.g. popovers/sheets, regardless of keyboard focus). Uses environment variables for connection details.",
+                description="Perform a mouse scroll at specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Emits real scroll-wheel events at the cursor (so it scrolls the view under the pointer, e.g. popovers/sheets, regardless of keyboard focus). Target machine via the optional `destination` arg (defaults to the registry default).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -161,7 +159,7 @@ async def main():
             ),
             types.Tool(
                 name="remote_macos_send_keys",
-                description="Send keyboard input to a remote MacOs machine. Uses environment variables for connection details.",
+                description="Send keyboard input to a remote MacOs machine. Target machine via the optional `destination` arg (defaults to the registry default).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -174,7 +172,7 @@ async def main():
             ),
             types.Tool(
                 name="remote_macos_mouse_move",
-                description="Move the mouse cursor to specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Uses environment variables for connection details.",
+                description="Move the mouse cursor to specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Target machine via the optional `destination` arg (defaults to the registry default).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -188,7 +186,7 @@ async def main():
             ),
             types.Tool(
                 name="remote_macos_mouse_click",
-                description="Perform a mouse click at specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Uses environment variables for connection details.",
+                description="Perform a mouse click at specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Target machine via the optional `destination` arg (defaults to the registry default).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -203,7 +201,7 @@ async def main():
             ),
             types.Tool(
                 name="remote_macos_mouse_double_click",
-                description="Perform a mouse double-click at specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Uses environment variables for connection details.",
+                description="Perform a mouse double-click at specified coordinates on a remote MacOs machine, with automatic coordinate scaling. Target machine via the optional `destination` arg (defaults to the registry default).",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -250,6 +248,24 @@ async def main():
                 },
             ),
         ]
+
+        # Inject the shared `destination` selector into every tool so ONE server
+        # can target any registered Mac per call (default = registry default).
+        names = dest_list_names()
+        default = dest_default_name()
+        dest_desc = (
+            "Target machine from the destinations registry"
+            + (f" (one of: {', '.join(names)})" if names else "")
+            + (f"; default '{default}' if omitted." if default else "; no default configured.")
+        )
+        dest_prop: dict[str, Any] = {"type": "string", "description": dest_desc}
+        if names:
+            dest_prop["enum"] = names
+        for _t in _tools:
+            props = _t.inputSchema.setdefault("properties", {})
+            props["destination"] = dest_prop
+
+        return _tools
 
     @server.call_tool()
     async def handle_call_tool(

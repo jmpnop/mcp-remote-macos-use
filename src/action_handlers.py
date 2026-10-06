@@ -9,6 +9,8 @@ import time
 import mcp.types as types
 # Import vnc_client from the current directory
 from vnc_client import VNCClient, capture_vnc_screen
+# Destination registry: one server, many target Macs chosen per call.
+from destinations import resolve as resolve_destination
 
 # Configure logging
 logging.basicConfig(
@@ -42,12 +44,8 @@ if not MACOS_PASSWORD:
 
 async def handle_remote_macos_get_screen(arguments: dict[str, Any]) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """Connect to a remote MacOs machine and get a screenshot of the remote desktop."""
-    # Use environment variables
-    host = MACOS_HOST
-    port = MACOS_PORT
-    password = MACOS_PASSWORD
-    username = MACOS_USERNAME
-    encryption = VNC_ENCRYPTION
+    # Resolve the target machine from the destinations registry (per-call `destination`).
+    host, port, password, username, encryption = resolve_destination(arguments.get("destination"))
 
     # Capture screen using helper method
     success, screen_data, error_message, dimensions = await capture_vnc_screen(
@@ -78,12 +76,8 @@ async def handle_remote_macos_get_screen(arguments: dict[str, Any]) -> list[type
 
 def handle_remote_macos_mouse_scroll(arguments: dict[str, Any]) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """Perform a mouse scroll action on a remote MacOs machine."""
-    # Use environment variables
-    host = MACOS_HOST
-    port = MACOS_PORT
-    password = MACOS_PASSWORD
-    username = MACOS_USERNAME
-    encryption = VNC_ENCRYPTION
+    # Resolve the target machine from the destinations registry (per-call `destination`).
+    host, port, password, username, encryption = resolve_destination(arguments.get("destination"))
 
     # Get required parameters from arguments
     x = arguments.get("x")
@@ -166,12 +160,8 @@ Scale factors: {scale_factors['x']:.4f}x, {scale_factors['y']:.4f}y"""
 
 def handle_remote_macos_mouse_click(arguments: dict[str, Any]) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """Perform a mouse click action on a remote MacOs machine."""
-    # Use environment variables
-    host = MACOS_HOST
-    port = MACOS_PORT
-    password = MACOS_PASSWORD
-    username = MACOS_USERNAME
-    encryption = VNC_ENCRYPTION
+    # Resolve the target machine from the destinations registry (per-call `destination`).
+    host, port, password, username, encryption = resolve_destination(arguments.get("destination"))
 
     # Get required parameters from arguments
     x = arguments.get("x")
@@ -232,12 +222,8 @@ Scale factors: {scale_factors['x']:.4f}x, {scale_factors['y']:.4f}y"""
 
 def handle_remote_macos_send_keys(arguments: dict[str, Any]) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """Send keyboard input to a remote MacOs machine."""
-    # Use environment variables
-    host = MACOS_HOST
-    port = MACOS_PORT
-    password = MACOS_PASSWORD
-    username = MACOS_USERNAME
-    encryption = VNC_ENCRYPTION
+    # Resolve the target machine from the destinations registry (per-call `destination`).
+    host, port, password, username, encryption = resolve_destination(arguments.get("destination"))
 
     # Get required parameters from arguments
     text = arguments.get("text")
@@ -370,12 +356,8 @@ def handle_remote_macos_send_keys(arguments: dict[str, Any]) -> list[types.TextC
 
 def handle_remote_macos_mouse_double_click(arguments: dict[str, Any]) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """Perform a mouse double-click action on a remote MacOs machine."""
-    # Use environment variables
-    host = MACOS_HOST
-    port = MACOS_PORT
-    password = MACOS_PASSWORD
-    username = MACOS_USERNAME
-    encryption = VNC_ENCRYPTION
+    # Resolve the target machine from the destinations registry (per-call `destination`).
+    host, port, password, username, encryption = resolve_destination(arguments.get("destination"))
 
     # Get required parameters from arguments
     x = arguments.get("x")
@@ -436,12 +418,8 @@ Scale factors: {scale_factors['x']:.4f}x, {scale_factors['y']:.4f}y"""
 
 def handle_remote_macos_mouse_move(arguments: dict[str, Any]) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """Move the mouse cursor on a remote MacOs machine."""
-    # Use environment variables
-    host = MACOS_HOST
-    port = MACOS_PORT
-    password = MACOS_PASSWORD
-    username = MACOS_USERNAME
-    encryption = VNC_ENCRYPTION
+    # Resolve the target machine from the destinations registry (per-call `destination`).
+    host, port, password, username, encryption = resolve_destination(arguments.get("destination"))
 
     # Get required parameters from arguments
     x = arguments.get("x")
@@ -510,12 +488,8 @@ def handle_remote_macos_open_application(arguments: dict[str, Any]) -> List[type
     Returns:
         List containing a TextContent with the result
     """
-    # Use environment variables
-    host = MACOS_HOST
-    port = MACOS_PORT
-    password = MACOS_PASSWORD
-    username = MACOS_USERNAME
-    encryption = VNC_ENCRYPTION
+    # Resolve the target machine from the destinations registry (per-call `destination`).
+    host, port, password, username, encryption = resolve_destination(arguments.get("destination"))
 
     identifier = arguments.get("identifier")
     if not identifier:
@@ -574,12 +548,8 @@ def handle_remote_macos_open_application(arguments: dict[str, Any]) -> List[type
 
 def handle_remote_macos_mouse_drag_n_drop(arguments: dict[str, Any]) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     """Perform a mouse drag operation on a remote MacOs machine."""
-    # Use environment variables
-    host = MACOS_HOST
-    port = MACOS_PORT
-    password = MACOS_PASSWORD
-    username = MACOS_USERNAME
-    encryption = VNC_ENCRYPTION
+    # Resolve the target machine from the destinations registry (per-call `destination`).
+    host, port, password, username, encryption = resolve_destination(arguments.get("destination"))
 
     # Get required parameters from arguments
     start_x = arguments.get("start_x")

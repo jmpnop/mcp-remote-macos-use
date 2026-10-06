@@ -311,32 +311,59 @@ def test_environment_variables_validation(mock_env_vars):
     assert server_module.MACOS_PASSWORD == 'test-password'
     assert server_module.VNC_ENCRYPTION == 'prefer_on'
 
-def test_missing_host_env_var():
-    """Test that missing MACOS_HOST raises an error."""
-    # Arrange
+def test_missing_env_does_not_crash_import():
+    """One-server model: a missing single-destination env must NOT crash import.
+
+    The old behavior raised at import when MACOS_HOST/MACOS_PASSWORD were unset.
+    Now destinations come from the registry, so an empty single-env is only a
+    warning — the server must still import so other configured destinations work.
+    """
     with patch.dict('os.environ', {
         'MACOS_HOST': '',
-        'MACOS_PASSWORD': 'test-password'
+        'MACOS_PASSWORD': '',
+        'MACOS_DESTINATIONS_FILE': '/nonexistent/remote-macos-destinations.json',
     }):
-        # Act & Assert
-        with pytest.raises(ValueError, match="MACOS_HOST environment variable is required but not set"):
-            # Reimport to trigger validation
-            with patch.dict('sys.modules'):
-                if 'src.mcp_remote_macos_use.server' in sys.modules:
-                    del sys.modules['src.mcp_remote_macos_use.server']
-                import src.mcp_remote_macos_use.server
+        os.environ.pop('MACOS_DESTINATIONS', None)
+        if 'src.mcp_remote_macos_use.server' in sys.modules:
+            del sys.modules['src.mcp_remote_macos_use.server']
+        import src.mcp_remote_macos_use.server  # must not raise
 
-def test_missing_password_env_var():
-    """Test that missing MACOS_PASSWORD raises an error."""
-    # Arrange
+
+def test_unresolved_destination_raises():
+    """resolve() gives a clear error when nothing is configured or the name is unknown."""
+    from src import destinations
+
+    with patch.dict('os.environ', {
+        'MACOS_HOST': '',
+        'MACOS_PASSWORD': '',
+        'MACOS_DESTINATIONS_FILE': '/nonexistent/remote-macos-destinations.json',
+    }):
+        os.environ.pop('MACOS_DESTINATIONS', None)
+        with pytest.raises(ValueError, match="No remote-macOS destinations configured"):
+            destinations.resolve(None)
+
     with patch.dict('os.environ', {
         'MACOS_HOST': 'test-host',
-        'MACOS_PASSWORD': ''
+        'MACOS_PASSWORD': 'test-password',
+        'MACOS_DESTINATIONS_FILE': '/nonexistent/remote-macos-destinations.json',
     }):
-        # Act & Assert
-        with pytest.raises(ValueError, match="MACOS_PASSWORD environment variable is required but not set"):
-            # Reimport to trigger validation
-            with patch.dict('sys.modules'):
-                if 'src.mcp_remote_macos_use.server' in sys.modules:
-                    del sys.modules['src.mcp_remote_macos_use.server']
-                import src.mcp_remote_macos_use.server 
+        os.environ.pop('MACOS_DESTINATIONS', None)
+        with pytest.raises(ValueError, match="Unknown destination"):
+            destinations.resolve('does-not-exist')
+
+
+def test_env_destination_resolves_as_default():
+    """The legacy MACOS_* env folds in as the 'env' destination and becomes default."""
+    from src import destinations
+
+    with patch.dict('os.environ', {
+        'MACOS_HOST': 'legacy-host',
+        'MACOS_PORT': '5901',
+        'MACOS_USERNAME': 'legacy-user',
+        'MACOS_PASSWORD': 'legacy-pw',
+        'MACOS_DESTINATIONS_FILE': '/nonexistent/remote-macos-destinations.json',
+    }):
+        os.environ.pop('MACOS_DESTINATIONS', None)
+        assert destinations.default_name() == 'env'
+        host, port, password, username, encryption = destinations.resolve(None)
+        assert (host, port, username, password) == ('legacy-host', 5901, 'legacy-user', 'legacy-pw') 

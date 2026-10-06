@@ -42,7 +42,13 @@ configure_event_loop()
 if not os.environ.get('CI') and os.environ.get('GITHUB_ACTIONS'):
     os.environ['CI'] = 'true'
 
-# Set environment variables for testing
+# Set environment variables for testing.
+# Point the destinations registry at a nonexistent file so the on-disk
+# ~/.config/remote-macos/destinations.json never leaks into tests; the legacy
+# MACOS_* env below is then folded in as the "env" destination and used as the
+# default, so handlers resolve to test-host when no `destination` is given.
+os.environ['MACOS_DESTINATIONS_FILE'] = '/nonexistent/remote-macos-destinations.json'
+os.environ.pop('MACOS_DESTINATIONS', None)
 os.environ['MACOS_HOST'] = 'test-host'
 os.environ['MACOS_PORT'] = '5900'
 os.environ['MACOS_USERNAME'] = 'test-user'
