@@ -31,6 +31,14 @@
 * **Minimal Setup**: Just enable Screen Sharing on the target Mac – no additional software needed
 * **Universal Compatibility**: Works with all macOS versions, current and future
   
+## Driving secure fields (lock screen / login / authd sheets)
+
+macOS Secure Event Input drops the synthetic events RFB injects, so those surfaces can't be
+typed into or clicked over plain screen sharing. For destinations that opt in, input is
+routed through a target-side virtual-HID device (real hardware keyboard + mouse) built from
+the **`vendor/vhid`** submodule. See **[docs/VHID.md](docs/VHID.md)** for the build,
+deploy, and integration, and [DESIGN.md](DESIGN.md) for the rationale.
+
 ## Why We Built This
 
 ### Native macOS Experience Without Compromise

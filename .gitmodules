@@ -1,0 +1,3 @@
+[submodule "vendor/vhid"]
+	path = vendor/vhid
+	url = git@github.com:jmpnop/vhid.git
