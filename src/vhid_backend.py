@@ -31,23 +31,31 @@ logger = logging.getLogger("vhid_backend")
 # is "command not found". [LAW:no-silent-failure]
 _VHID = "/usr/local/bin/vhid"
 
-# MCP key/modifier names (see action_handlers special_keys/modifier_keys) -> vhid names.
-# vhid is built on Karabiner-DriverKit, which uses these identifiers. type_text and click
-# (the secure-sheet-critical verbs) need none of this; an unmapped key makes map_keys
-# return None so the caller falls back to RFB rather than press a wrong key.
+# MCP key/modifier names (see action_handlers special_keys/modifier_keys) -> the names the
+# vhid CLI's `press` verb accepts (from `vhid press --help`). These are vhid's OWN chord
+# vocabulary, NOT the raw Karabiner-DriverKit identifiers it is built on: a chord is modifier
+# names and one key joined by '+', e.g. leftCommand+s. Emitting a Karabiner name like
+# "return_or_enter" or "spacebar" makes vhid reject the whole chord, so the caller silently
+# falls back to RFB — which cannot reach the lock screen / auth sheets these verbs exist for.
+# type_text and click (the secure-sheet-critical verbs) need none of this; an unmapped key
+# makes map_keys return None so the caller falls back to RFB rather than press a wrong key.
 _MODIFIERS = {
     "cmd": "leftCommand", "command": "leftCommand", "win": "leftCommand",
     "super": "leftCommand", "meta": "leftCommand",
     "shift": "leftShift", "ctrl": "leftControl", "control": "leftControl",
-    "alt": "leftOption", "option": "leftOption", "fn": "fn",
+    "alt": "leftOption", "option": "leftOption", "fn": "function",
 }
+# vhid key names: return, tab, space, delete, forwardDelete, escape, help, home, end, pageUp,
+# pageDown, left, right, up, down, f1..f20. macOS naming: the key above Return (what most
+# callers mean by "backspace") is `delete`; the forward-delete key is `forwardDelete`.
 _SPECIALS = {
-    "enter": "return_or_enter", "return": "return_or_enter",
-    "escape": "escape", "esc": "escape", "tab": "tab", "space": "spacebar",
-    "delete": "delete_forward", "del": "delete_forward", "backspace": "delete_or_backspace",
-    "up": "up_arrow", "down": "down_arrow", "left": "left_arrow", "right": "right_arrow",
-    "home": "home", "end": "end", "page_up": "page_up", "page_down": "page_down",
-    **{f"f{i}": f"f{i}" for i in range(1, 13)},
+    "enter": "return", "return": "return",
+    "escape": "escape", "esc": "escape", "tab": "tab", "space": "space",
+    "delete": "forwardDelete", "del": "forwardDelete", "backspace": "delete",
+    "up": "up", "down": "down", "left": "left", "right": "right",
+    "home": "home", "end": "end", "page_up": "pageUp", "page_down": "pageDown",
+    "help": "help",
+    **{f"f{i}": f"f{i}" for i in range(1, 21)},
 }
 
 
@@ -105,8 +113,11 @@ def map_keys(mcp_names: List[str]) -> Optional[str]:
 
 def type_text(ssh: str, text: str) -> Tuple[bool, str]:
     """Type ``text`` as real keystrokes wherever focus is (no --into: so it targets the
-    lock screen / a cross-process sheet, which have no owning app)."""
-    return _run(ssh, ["type", text], timeout=max(20, len(text) // 5 + 15))
+    lock screen / a cross-process sheet, which have no owning app).
+
+    ``--`` ends option parsing so text beginning with '-' is typed literally rather than read
+    as a flag (vhid: "Text starting with - follows --")."""
+    return _run(ssh, ["type", "--", text], timeout=max(20, len(text) // 5 + 15))
 
 
 def press(ssh: str, chord: str) -> Tuple[bool, str]:
