@@ -10,14 +10,18 @@ transport, shell-safe quoting, MCP-name -> vhid-name key mapping, and readiness 
 Input only — screen capture stays on the RFB path. Every verb returns ``(ok, detail)`` and
 never raises for an unreachable/erroring target, so the caller can fall back to RFB.
 
-Coordinates are passed through unchanged: the handlers already scale a request's
-source coordinates to the framebuffer, and the framebuffer is the display, so those integers
-are exactly vhid's "absolute screen point from the top-left of the main display".
+Coordinates: the handlers scale a request's source coordinates to the RFB framebuffer, which
+is sized in PIXELS. vhid's coordinates are logical SCREEN POINTS (the space the cursor and
+CoreGraphics report in). On a Retina/HiDPI display pixels = points x backingScaleFactor (2.0),
+so a framebuffer-pixel coordinate is twice the point vhid wants and a click would land
+off-screen. This module converts framebuffer pixels -> points itself (``_display_scale`` /
+``_to_points``), discovering the main display's scale once per target and caching it, so the
+handlers stay dumb about vhid's coordinate space. A non-Retina display is scale 1.0 (a no-op).
 """
 
 import logging
 import subprocess
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger("vhid_backend")
 
@@ -113,26 +117,83 @@ def press(ssh: str, chord: str) -> Tuple[bool, str]:
     return _run(ssh, ["press", chord])
 
 
+# Discovered main-display scale (framebuffer pixels / logical points) per ssh endpoint,
+# cached for the process lifetime. (1.0, 1.0) means non-Retina OR an unknown/failed probe:
+# treat framebuffer pixels as points, which is exactly right on a 1x display and, on a 2x
+# display where the probe failed, lands the unconverted click off-screen so the caller falls
+# back to RFB — never a wrong-place click reported as success. [LAW:no-silent-failure]
+_scale_cache: Dict[str, Tuple[float, float]] = {}
+
+# Swift snippet that prints the main display's logical size (points) and backing-store size
+# (pixels) as "<ptW> <ptH> <pxW> <pxH>". CGMainDisplayID/CGDisplayBounds/CGDisplayCopyDisplayMode
+# read geometry without a WindowServer connection, so this answers over a plain (non-GUI) ssh.
+_DISPLAY_PROBE = (
+    "import CoreGraphics\n"
+    "let d = CGMainDisplayID()\n"
+    "let b = CGDisplayBounds(d)\n"
+    "let m = CGDisplayCopyDisplayMode(d)\n"
+    'print("\\(Int(b.width)) \\(Int(b.height)) \\(m?.pixelWidth ?? 0) \\(m?.pixelHeight ?? 0)")\n'
+)
+
+
+def _display_scale(ssh: str) -> Tuple[float, float]:
+    """(scale_x, scale_y) = framebuffer pixels / logical points for ``ssh``'s main display.
+
+    Probed once via CoreGraphics (``swift -``) and cached. Any failure — no Swift toolchain,
+    probe error, nonsensical numbers — yields (1.0, 1.0): correct on a 1x display, and on a 2x
+    display the unconverted click simply misses so the caller falls back to RFB, rather than a
+    confident click in the wrong place."""
+    cached = _scale_cache.get(ssh)
+    if cached is not None:
+        return cached
+    scale = (1.0, 1.0)
+    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", ssh, "/usr/bin/swift", "-"]
+    try:
+        p = subprocess.run(cmd, input=_DISPLAY_PROBE, capture_output=True, text=True, timeout=30)
+        if p.returncode == 0:
+            parts = (p.stdout or "").split()
+            if len(parts) == 4:
+                ptw, pth, pxw, pxh = (float(v) for v in parts)
+                if ptw > 0 and pth > 0 and pxw > 0 and pxh > 0:
+                    scale = (pxw / ptw, pxh / pth)
+    except Exception as e:  # noqa: BLE001
+        logger.info("display-scale probe failed for %s (%s); assuming 1.0x", ssh, e)
+    _scale_cache[ssh] = scale
+    logger.info("vhid display scale for %s = %.4gx%.4g", ssh, scale[0], scale[1])
+    return scale
+
+
+def _to_points(ssh: str, x: int, y: int) -> Tuple[int, int]:
+    """Convert a framebuffer-PIXEL (x, y) to the logical SCREEN POINTS vhid's verbs expect."""
+    sx, sy = _display_scale(ssh)
+    return int(round(x / sx)), int(round(y / sy))
+
+
 def click(ssh: str, x: int, y: int, button: str = "left", times: int = 1,
           modifiers: Optional[str] = None) -> Tuple[bool, str]:
-    """Left/right click ``times`` at absolute screen point (x, y) — the framebuffer
-    coordinates the handler already computed. ``modifiers`` is a vhid chord or None."""
-    args = ["click", str(int(x)), str(int(y)), "--button", button, "--times", str(int(times))]
+    """Left/right click ``times`` at framebuffer-pixel (x, y) (the handler's scaled coords),
+    converted here to the logical screen point vhid clicks. ``modifiers`` is a chord or None."""
+    px, py = _to_points(ssh, x, y)
+    args = ["click", str(px), str(py), "--button", button, "--times", str(int(times))]
     if modifiers:
         args += ["--modifiers", modifiers]
     return _run(ssh, args)
 
 
 def move(ssh: str, x: int, y: int) -> Tuple[bool, str]:
-    """Move the pointer to absolute screen point (x, y), pressing nothing."""
-    return _run(ssh, ["move", str(int(x)), str(int(y))])
+    """Move the pointer to framebuffer-pixel (x, y) (converted to logical points), pressing nothing."""
+    px, py = _to_points(ssh, x, y)
+    return _run(ssh, ["move", str(px), str(py)])
 
 
 def scroll(ssh: str, x: int, y: int, vertical: int) -> Tuple[bool, str]:
-    """Roll the wheel ``vertical`` notches over the point (x, y) (sign = direction)."""
-    return _run(ssh, ["scroll", str(int(x)), str(int(y)), "--vertical", str(int(vertical))])
+    """Roll the wheel ``vertical`` notches over framebuffer-pixel (x, y) (converted to points)."""
+    px, py = _to_points(ssh, x, y)
+    return _run(ssh, ["scroll", str(px), str(py), "--vertical", str(int(vertical))])
 
 
 def drag(ssh: str, x1: int, y1: int, x2: int, y2: int) -> Tuple[bool, str]:
-    """Press at (x1, y1) and release at (x2, y2) — a drag between two screen points."""
-    return _run(ssh, ["drag", str(int(x1)), str(int(y1)), str(int(x2)), str(int(y2))])
+    """Press at (x1, y1) and release at (x2, y2) — framebuffer-pixel coords, each converted to points."""
+    p1x, p1y = _to_points(ssh, x1, y1)
+    p2x, p2y = _to_points(ssh, x2, y2)
+    return _run(ssh, ["drag", str(p1x), str(p1y), str(p2x), str(p2y)])

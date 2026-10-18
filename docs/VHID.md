@@ -113,3 +113,20 @@ A destination opts in via `~/.config/remote-macos/destinations.json`:
 the non-login ssh PATH has no `/usr/local/bin`). Screen capture always stays on RFB; only
 keyboard/mouse route through vhid, and only when `vhid doctor` reports `ready`, else the
 handler falls back to RFB.
+
+### Coordinate space: framebuffer pixels → logical points
+
+The handlers scale a request's coordinates to the RFB framebuffer, which is sized in
+**pixels**. `vhid`'s verbs, however, take **logical screen points** — the space the cursor
+and CoreGraphics report in. On a Retina/HiDPI display `pixels = points × backingScaleFactor`
+(2.0), so a framebuffer-pixel coordinate is twice the point `vhid` wants: an unconverted
+click lands at 2× and misses the screen entirely. This only bites on a 2× display — on a 1×
+display pixels == points, so it was invisible until driving a Retina MacBook Air.
+
+`vhid_backend.py` converts px → pt itself (`_display_scale` / `_to_points`), so the handlers
+stay dumb about `vhid`'s coordinate space. `_display_scale` discovers the main display's
+backing scale **once per target** via a read-only CoreGraphics probe over SSH
+(`CGMainDisplayID` / `CGDisplayBounds` for points, `CGDisplayCopyDisplayMode` for pixels)
+and caches it. Any probe failure falls back to `(1.0, 1.0)`: exactly right on a 1× display,
+and on a 2× display the unconverted click simply misses so the handler falls back to RFB —
+never a confident click reported as success in the wrong place.
