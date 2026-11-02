@@ -252,6 +252,103 @@ class TestVNCClient:
             
             # Call the connect method directly (stubbed version)
             result, _ = client.connect()
-            
+
             # Assert that connection was successful (according to our stub)
-            assert result is True 
+            assert result is True
+
+
+def _keyevent(key: int, down: bool) -> bytes:
+    """The exact bytes VNCClient.send_key_event emits for a standard RFB KeyEvent
+    (msg type 4): [4][down:u8][0,0 padding][keysym:u32 big-endian]."""
+    return bytes([4, 1 if down else 0, 0, 0]) + key.to_bytes(4, "big")
+
+
+def _sent_frames(sock) -> list:
+    """All byte strings handed to socket.sendall, in order."""
+    return [c.args[0] for c in sock.sendall.call_args_list]
+
+
+class TestSendText:
+    """Lock the on-the-wire byte sequence send_text emits — in particular that a
+    shifted symbol is Shift + the BASE key (no RFB double-shift)."""
+
+    def _client_with_socket(self):
+        # prefer_hid defaults False, so send_key_event uses the standard keysym
+        # KeyEvent path (not the QEMU extended-key path).
+        client = VNCClient(host="h", port=5900, password="p", username="u")
+        client.socket = MagicMock()
+        return client
+
+    def test_shifted_symbol_exclam_uses_base_key_not_double_shift(self):
+        """'!' must be Shift + keysym 0x31 ('1'), NEVER Shift + 0x21 ('!')."""
+        SHIFT = 0xffe1
+        c = self._client_with_socket()
+        with patch("src.vnc_client.time.sleep"):
+            assert c.send_text("!") is True
+        frames = _sent_frames(c.socket)
+        assert frames == [
+            _keyevent(SHIFT, True),
+            _keyevent(0x31, True),   # base key '1' — the fix
+            _keyevent(0x31, False),
+            _keyevent(SHIFT, False),
+        ]
+        # Regression guard: the already-shifted keysym 0x21 must never go on the wire.
+        assert _keyevent(0x21, True) not in frames
+        assert _keyevent(0x21, False) not in frames
+
+    def test_shifted_symbol_colon_uses_semicolon_base(self):
+        """':' must be Shift + keysym 0x3b (';'), not Shift + 0x3a (':')."""
+        SHIFT = 0xffe1
+        c = self._client_with_socket()
+        with patch("src.vnc_client.time.sleep"):
+            assert c.send_text(":") is True
+        frames = _sent_frames(c.socket)
+        assert frames == [
+            _keyevent(SHIFT, True),
+            _keyevent(0x3b, True),
+            _keyevent(0x3b, False),
+            _keyevent(SHIFT, False),
+        ]
+        assert _keyevent(0x3a, True) not in frames
+
+    def test_uppercase_letter_unchanged(self):
+        """Uppercase letters stay Shift + keysym 0x41 ('A') — not regressed."""
+        SHIFT = 0xffe1
+        c = self._client_with_socket()
+        with patch("src.vnc_client.time.sleep"):
+            assert c.send_text("A") is True
+        frames = _sent_frames(c.socket)
+        assert frames == [
+            _keyevent(SHIFT, True),
+            _keyevent(0x41, True),
+            _keyevent(0x41, False),
+            _keyevent(SHIFT, False),
+        ]
+
+    def test_lowercase_letter_no_shift(self):
+        """Lowercase letters send no Shift and keysym == ord(char)."""
+        c = self._client_with_socket()
+        with patch("src.vnc_client.time.sleep"):
+            assert c.send_text("a") is True
+        frames = _sent_frames(c.socket)
+        assert frames == [
+            _keyevent(0x61, True),
+            _keyevent(0x61, False),
+        ]
+
+    def test_password_makeevka_ends_with_shift_one_and_no_double_shift(self):
+        """The real failing case: 'Makeevka54!' ends in Shift+'1', and the shifted
+        keysym 0x21 for '!' appears nowhere on the wire."""
+        SHIFT = 0xffe1
+        c = self._client_with_socket()
+        with patch("src.vnc_client.time.sleep"):
+            assert c.send_text("Makeevka54!") is True
+        frames = _sent_frames(c.socket)
+        # Trailing '!' => Shift down, '1' down, '1' up, Shift up.
+        assert frames[-4:] == [
+            _keyevent(SHIFT, True),
+            _keyevent(0x31, True),
+            _keyevent(0x31, False),
+            _keyevent(SHIFT, False),
+        ]
+        assert all(_keyevent(0x21, d) not in frames for d in (True, False))

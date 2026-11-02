@@ -16,6 +16,44 @@ logger = logging.getLogger('vnc_client')
 logger.setLevel(logging.DEBUG)
 
 
+# US-layout map: a SHIFTED symbol -> the X11 keysym of the BASE (unshifted) key it
+# sits above, so the symbol is produced as Shift + <base key>.
+#
+# Why this must exist: for a shifted symbol such as '!', ord('!') == 0x21 is ALREADY
+# the X11 keysym for the shifted glyph ("exclam"). Sending Shift together with an
+# already-shifted keysym is the classic RFB "double-shift": the server applies shift
+# to a symbol that is itself the shifted form and mis-resolves it (commonly to the
+# base key '1', or a wrong glyph). The macOS login window then rejects the password
+# even though the dot-count looks right. The correct RFB encoding of '!' on a US
+# keyboard is Shift + keysym 0x31 ('1'); likewise for every other shifted symbol.
+#
+# Keys are exactly the 21 shifted symbols the old code flagged for Shift; values are
+# the base-key keysyms (which equal the ASCII code of the unshifted character).
+_US_SHIFTED_SYMBOL_BASE = {
+    '~': 0x60,  # ` (grave)
+    '!': 0x31,  # 1
+    '@': 0x32,  # 2
+    '#': 0x33,  # 3
+    '$': 0x34,  # 4
+    '%': 0x35,  # 5
+    '^': 0x36,  # 6
+    '&': 0x37,  # 7
+    '*': 0x38,  # 8
+    '(': 0x39,  # 9
+    ')': 0x30,  # 0
+    '_': 0x2d,  # - (minus)
+    '+': 0x3d,  # = (equal)
+    '{': 0x5b,  # [ (bracketleft)
+    '}': 0x5d,  # ] (bracketright)
+    '|': 0x5c,  # \ (backslash)
+    ':': 0x3b,  # ; (semicolon)
+    '"': 0x27,  # ' (apostrophe)
+    '<': 0x2c,  # , (comma)
+    '>': 0x2e,  # . (period)
+    '?': 0x2f,  # / (slash)
+}
+
+
 async def capture_vnc_screen(host: str, port: int, password: str, username: Optional[str] = None,
                              encryption: str = "prefer_on") -> Tuple[bool, Optional[bytes], Optional[str], Optional[Tuple[int, int]]]:
     """Capture a screenshot from a remote MacOs machine.
@@ -1059,12 +1097,21 @@ class VNCClient:
                     key = 0xff08
                 elif char == ' ':  # Space
                     key = 0x20
+                elif char in _US_SHIFTED_SYMBOL_BASE:
+                    # Shifted symbol (e.g. '!'): send Shift + the BASE key's keysym,
+                    # NOT Shift + ord(char). ord('!')==0x21 is already the shifted
+                    # keysym, so Shift + 0x21 is a double-shift the server mis-resolves
+                    # (this is exactly why '!' failed at the login window). Shift is
+                    # pressed below because the char is a key of _US_SHIFTED_SYMBOL_BASE.
+                    key = _US_SHIFTED_SYMBOL_BASE[char]
                 else:
                     # For printable ASCII and Unicode characters
                     key = ord(char)
 
-                # If it's an uppercase letter, we need to simulate a shift press
-                need_shift = char.isupper() or char in '~!@#$%^&*()_+{}|:"<>?'
+                # Press Shift for uppercase letters (keysym 0x41 'A' etc. — redundant
+                # shift is idempotent for letters) and for shifted symbols (where `key`
+                # is now the BASE keysym, so Shift is what actually produces the symbol).
+                need_shift = char.isupper() or char in _US_SHIFTED_SYMBOL_BASE
 
                 if need_shift:
                     # Press shift (left shift keysym = 0xffe1)

@@ -24,7 +24,9 @@ def test_map_keys_modifiers_and_letters():
 
 
 def test_map_keys_specials():
-    assert vb.map_keys(["enter"]) == "return_or_enter"
+    # vhid's OWN key vocabulary (not the raw Karabiner "return_or_enter"): the key
+    # above Return is `return`. Emitting a Karabiner name makes vhid reject the chord.
+    assert vb.map_keys(["enter"]) == "return"
     assert vb.map_keys(["escape"]) == "escape"
     assert vb.map_keys(["f5"]) == "f5"
 
@@ -42,8 +44,9 @@ def test_type_text_builds_ssh_vhid_type():
     assert ok
     argv = run.call_args[0][0]
     assert argv[0] == "ssh" and "dima@h" in argv
-    # Invoked by absolute path: the remote non-login ssh PATH lacks /usr/local/bin.
-    assert argv[-3:] == ["/usr/local/bin/vhid", "type", "Gagarin0!"]
+    # Invoked by absolute path (the remote non-login ssh PATH lacks /usr/local/bin),
+    # and `--` ends option parsing so text beginning with '-' is typed literally.
+    assert argv[-4:] == ["/usr/local/bin/vhid", "type", "--", "Gagarin0!"]
 
 
 def test_press_builds_chord():
