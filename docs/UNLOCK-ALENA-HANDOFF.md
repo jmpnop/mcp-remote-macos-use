@@ -14,10 +14,21 @@
 | macOS | 15.7.7 |
 | Display | Retina 3360×2100 (backing scale 2.0) |
 
+> ## ✅ COMPLETED — 2026-11-01
+>
+> This handoff has been fully executed. `vhid-0.4.1.pkg` was built (universal
+> x86_64+arm64), notarized, stapled, and installed on **Alena's MacBook Pro**; the
+> Karabiner DriverKit extension was approved by a human at the machine, and
+> `vhid doctor` now reports **`ready`** (driver extension running, both virtual HID
+> devices up). A real-HID keypress was confirmed end-to-end through the MCP
+> (`Sent via vhid (real HID)`). The same pkg was also installed and approved on
+> **paimei** (`vhid doctor` → `ready`), and paimei's registry entry was switched to
+> `input: vhid`. The sections below are retained as the record of why/how.
+
 **Status after this session:** the pure-software RFB bug is **fixed** and the `alena`
 destination is **switched to the `vhid` backend** (with automatic RFB fallback). The ONE
-thing left is a physical, one-time step on the MacBook Pro itself — see
-[The one remaining step](#the-one-remaining-step).
+thing left was a physical, one-time step on the MacBook Pro itself (now **done** — see the
+COMPLETED banner above).
 
 ---
 
@@ -28,10 +39,13 @@ thing left is a physical, one-time step on the MacBook Pro itself — see
 2. ✅ **Done:** `alena` now routes keyboard/mouse through **vhid** (real hardware HID over
    SSH), which reaches the lock screen that synthetic RFB input cannot. Falls back to RFB
    automatically if vhid is unavailable. See [Path B](#path-b--vhid-the-deterministic-path).
-3. ⏳ **Remaining (needs a human at the MacBook once):** install the vhid `.pkg` on the MBP
-   and **approve its DriverKit system extension** in System Settings. This cannot be driven
-   over VNC (it is a Secure-Event-Input GUI step) and the MBP is currently locked.
-4. After approval, unlock is two MCP calls — [The unlock procedure](#the-unlock-procedure).
+3. ✅ **Done (2026-11-01):** built + notarized `vhid-0.4.1.pkg`, installed it on the MBP, and a
+   human approved the DriverKit system extension in System Settings (the one step that cannot
+   be driven over VNC — a Secure-Event-Input GUI action). `vhid doctor` → `ready`.
+4. ✅ **Verified:** real-HID input flows through the MCP (`Sent via vhid (real HID)`); unlock is
+   now the two MCP calls in [The unlock procedure](#the-unlock-procedure).
+5. ✅ **Also done:** same pkg installed + extension approved on **paimei**, and `paimei` switched
+   to `input: vhid` in the registry.
 
 ---
 

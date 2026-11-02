@@ -161,7 +161,9 @@ Perform a mouse click at specified coordinates on a remote macOS machine, with a
 Perform a mouse double-click at specified coordinates on a remote macOS machine, with automatic coordinate scaling. Uses environment variables for connection details.
 
 #### remote_macos_mouse_scroll
-Perform a mouse scroll at specified coordinates on a remote macOS machine, with automatic coordinate scaling. Uses environment variables for connection details.
+Perform a mouse scroll at specified coordinates on a remote macOS machine, with automatic coordinate scaling. Emits real RFB scroll-wheel events at the cursor (bit 3 = wheel up, bit 4 = wheel down), so it scrolls the view *under the pointer* — popovers, sheets, sidebars — regardless of which window holds keyboard focus. The `clicks` argument is the number of wheel notches (1–1200, default 5).
+
+**macOS scroll quirk (important):** Apple's `screensharingd` delivers each RFB wheel notch as a *pixel-precision* scroll of roughly **one point**, not a multi-line scroll. So a handful of notches barely moves a long list. This is **not** an event-coalescing/timing problem — 15 notches sent at 5 ms vs 150 ms per phase move the view identically — the per-notch magnitude is simply tiny. Scrolling distance comes from **volume + speed**: many notches sent in a fast burst let macOS scroll *acceleration* build (≈100–300 notches move a screenful; ≈500+ traverses a long Settings/list view). The handler therefore sends notches back-to-back with only a ~2 ms gap and allows up to 1200 per call. Pass large `clicks` values for long content.
 
 #### remote_macos_open_application
 Opens/activates an application and returns its PID for further interactions.
