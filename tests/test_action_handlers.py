@@ -164,6 +164,35 @@ async def test_handle_remote_macos_mouse_scroll(mock_env_vars):
         assert button_masks == [0, 16, 0, 16, 0, 16, 0]
 
 @pytest.mark.asyncio
+async def test_handle_remote_macos_mouse_scroll_emits_every_requested_notch(mock_env_vars):
+    """A large clicks value must NOT be clamped to the old 50-notch cap.
+
+    macOS screensharingd delivers each RFB wheel notch as a ~1pt pixel-precision scroll, so
+    long lists need hundreds of notches; the handler now caps at 1200. Patch time.sleep so the
+    burst doesn't actually wait. 400 requested -> 400 wheel-down presses emitted; 5000 -> 1200.
+    """
+    for requested, expected in [(400, 400), (5000, 1200)]:
+        with patch(VNC_CLIENT_PATH) as MockVNCClass, patch.object(action_handlers.time, "sleep"):
+            mock_instance = MagicMock()
+            MockVNCClass.return_value = mock_instance
+            mock_instance.connect.return_value = (True, None)
+            mock_instance.width = 1920
+            mock_instance.height = 1080
+            mock_instance.send_pointer_event.return_value = True
+
+            args = {"x": 100, "y": 200, "direction": "down", "clicks": requested}
+            if IS_MOUSE_SCROLL_ASYNC:
+                await handle_remote_macos_mouse_scroll(args)
+            else:
+                handle_remote_macos_mouse_scroll(args)
+
+            masks = [call.args[2] for call in mock_instance.send_pointer_event.call_args_list]
+            # 1 initial settle move (mask 0) + expected * (press 16, release 0)
+            assert masks[0] == 0
+            assert masks.count(16) == expected, f"requested {requested} -> {masks.count(16)} notches"
+            assert len(masks) == 1 + 2 * expected
+
+@pytest.mark.asyncio
 async def test_handle_remote_macos_mouse_click(mock_env_vars):
     """Test mouse click handling with VNCClient patching."""
     with patch(VNC_CLIENT_PATH) as MockVNCClass:

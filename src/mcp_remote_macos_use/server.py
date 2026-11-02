@@ -152,7 +152,7 @@ async def main():
                             "enum": ["up", "down"],
                             "default": "down"
                         },
-                        "clicks": {"type": "integer", "description": "Number of scroll-wheel notches to emit at the cursor", "default": 5}
+                        "clicks": {"type": "integer", "description": "Number of scroll-wheel notches to emit at the cursor (1-1200). macOS delivers each notch as a tiny ~1pt pixel-precision scroll, so pass large values for long lists: ~100-300 moves a screenful, ~500+ traverses a long settings/list view. Sent as a fast burst so macOS scroll acceleration builds.", "default": 5}
                     },
                     "required": ["x", "y"]
                 },

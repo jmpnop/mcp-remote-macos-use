@@ -162,16 +162,26 @@ def handle_remote_macos_mouse_scroll(arguments: dict[str, Any]) -> list[types.Te
         #   bit 3 = wheel up (mask 8), bit 4 = wheel down (mask 16)
         wheel_mask = 8 if direction.lower() == "up" else 16
         clicks = int(arguments.get("clicks", 5))
-        clicks = max(1, min(clicks, 50))
+        clicks = max(1, min(clicks, 1200))
 
+        # ROOT CAUSE (measured live against macOS screensharingd, 2026-11): one RFB wheel
+        # notch is delivered as a PIXEL-precision scroll of ~1 point, not a line scroll of
+        # several lines, so a handful of notches barely moves a long list -- and the old
+        # 50-notch cap made real scrolling impossible. Delivery is NOT the problem: an A/B of
+        # 15 notches at 5ms vs 150ms per phase moved the view IDENTICALLY, so notches are not
+        # being coalesced/dropped by going too fast (the previous "add a gap or Apple
+        # coalesces" assumption was wrong). What actually helps is volume + SPEED: many
+        # notches sent close together let macOS scroll ACCELERATION build, so a fast burst
+        # covers far more ground than the same count sent slowly (300 notches at 2ms scrolled
+        # a long list; 15 at 150ms did not). Hence a high cap and a minimal gap. The gap stays
+        # non-zero so each notch is still a distinct press->release; 2ms was verified on-LAN
+        # to deliver every notch.
         wheel_result = True
         for _ in range(clicks):
-            # Each notch must be a distinct press->release with a gap, or Apple's VNC
-            # coalesces the burst into a single (or zero) scroll event.
             wheel_result = vnc.send_pointer_event(scaled_x, scaled_y, wheel_mask) and wheel_result
-            time.sleep(0.02)
+            time.sleep(0.002)
             wheel_result = vnc.send_pointer_event(scaled_x, scaled_y, 0) and wheel_result
-            time.sleep(0.04)
+            time.sleep(0.002)
 
         # Prepare the response with useful details
         scale_factors = {
